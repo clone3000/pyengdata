@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  backend:
+    image: python:3.9-slim
+    container_name: energy_backend
+    working_dir: /app
+    volumes:
+      - ./backend:/app
+    ports:
+      - "8000:8000"
+    command: >
+      sh -c "
+      pip install --no-cache-dir fastapi uvicorn pandas &&
+      uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+      "
+    networks:
+      - energy_network
+
+  frontend:
+    image: python:3.9-slim
+    container_name: energy_frontend
+    working_dir: /app
+    volumes:
+      - ./frontend:/app
+    ports:
+      - "8501:8501"
+    depends_on:
+      - backend
+    command: >
+      sh -c "
+      pip install --no-cache-dir streamlit requests pandas plotly &&
+      streamlit run app.py --server.port=8501 --server.address=0.0.0.0
+      "
+    environment:
+      - BACKEND_URL=http://backend:8000
+    networks:
+      - energy_network
+
+networks:
+  energy_network:
+    driver: bridge
