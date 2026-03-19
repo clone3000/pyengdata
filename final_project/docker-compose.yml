@@ -1,0 +1,124 @@
+version: '3.8'
+
+x-airflow-common: &airflow-common
+  image: apache/airflow:2.8.1-python3.10
+  environment:
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres-airflow/airflow
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'False'
+    AIRFLOW__WEBSERVER__SECRET_KEY: 'my_secret_key'
+    AIRFLOW__CORE__FERNET_KEY: ''
+    
+    AIRFLOW_UID: 50000
+    
+    _PIP_ADDITIONAL_REQUIREMENTS: "pandas pyarrow psycopg2-binary"
+    
+    CONNECTION_CHECK_MAX_COUNT: 60
+    CONNECTION_CHECK_SLEEP_TIME: 5
+    
+    POSTGRES_HOST: postgres
+    POSTGRES_USER: postgres
+    POSTGRES_PASSWORD: postgres
+    POSTGRES_DB: delivery_db
+    
+    JAVA_HOME: /usr/lib/jvm/java-11-openjdk-amd64
+    
+    AIRFLOW_CONN_POSTGRES_DELIVERY: 'postgresql://postgres:postgres@postgres:5432/delivery_db'
+    
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - ./scripts:/opt/airflow/scripts
+    - ./data:/opt/airflow/data
+    - ./logs:/opt/airflow/logs
+    - ./plugins:/opt/airflow/plugins
+  depends_on:
+    postgres-airflow:
+      condition: service_healthy
+    postgres:
+      condition: service_healthy
+  networks:
+    - delivery_network
+
+services:
+  postgres-airflow:
+    image: postgres:15
+    container_name: airflow_db
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres_airflow_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - delivery_network
+
+  postgres:
+    image: postgres:15
+    container_name: delivery_postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: delivery_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - delivery_network
+
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: delivery_pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "8081:80"
+    depends_on:
+      - postgres
+    networks:
+      - delivery_network
+
+  airflow-init:
+    <<: *airflow-common
+    container_name: airflow_init
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        airflow db init
+        airflow users create --username admin --firstname admin --lastname admin --role Admin --email admin@example.com --password admin
+    restart: 'no'
+
+  airflow-webserver:
+    <<: *airflow-common
+    container_name: airflow_webserver
+    command: webserver
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
+  airflow-scheduler:
+    <<: *airflow-common
+    container_name: airflow_scheduler
+    command: scheduler
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  postgres_airflow_data:
+
+networks:
+  delivery_network:
+    driver: bridge
